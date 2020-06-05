@@ -1,0 +1,211 @@
+*Clear out work library;
+
+PROC DATASETS LIBRARY=work nolist kill;
+QUIT;
+
+*PROC DATASETS LIBRARY = WORK;
+*	MODIFY h201;
+*	FORMAT _all_;
+*	INFORMAT _all_;
+*	run;
+*Import the 2017 Full Year Consolidated Data File downloaded from https://meps.ahrq.gov/mepsweb/data_stats/download_data_files.jsp;
+FILENAME h201 '/folders/myfolders/h201.ssp';
+
+PROC XCOPY IN=h201 OUT=WORK IMPORT;
+RUN;
+
+*Import the 2012 Full Year Consolidated Data File downloaded from https://meps.ahrq.gov/mepsweb/data_stats/download_data_files.jsp;
+FILENAME h155 '/folders/myfolders/h155.ssp';
+
+PROC XCOPY IN=h155 OUT=WORK IMPORT;
+RUN;
+
+PROC FORMAT;
+	*Create age buckets by youth (0-18), young adult/middle AGE17X (19-55), and older adult (56+), and records with no age listed;
+	VALUE AGE_BUCKET
+	.='ALL AGES' 0-18='0-18' 19-55='19-55' 56-HIGH='56+' -1='NO AGE';
+	*Assign flag to the age buckets;
+	VALUE AGE_FLAG
+	.='ALL AGES' 1='0-18' 2='19-55' 3='56+' 4='NO AGE';
+RUN;
+
+*Create datset based on 2017 data containing age, expenses, age flag;
+
+DATA EXP_2017;
+	SET WORK.h201 (KEEP=AGE17X TOTEXP17);
+	TOTAL=TOTEXP17;
+	AGE_BUCKET=AGE17X;
+	EXPENSES=0;
+
+	IF TOTAL > 0 THEN
+		EXPENSES=1;
+	FORMAT AGE_BUCKET AGE_BUCKET.;
+RUN;
+
+*CREATE SUMMARY STATISTICS;
+TITLE 'SUMMARY STATISTICS FOR TOTAL 2017 HEALTHCARE EXPENSES';
+*Run desciptive stats for 2017 total expenses;
+
+PROC MEANS DATA=EXP_2017 SUM NMISS MEAN STD STDERR LCLM UCLM MEDIAN MIN MAX 
+		QRANGE MAXDEC=2;
+	VAR TOTEXP17;
+RUN;
+
+TITLE 'SUMMARY STATISTICS FOR TOTAL 2017 HEALTHCARE EXPENSES BY AGE BUCKET';
+*Run descriptive stats for 2017 total expenses by age flag;
+
+PROC MEANS DATA=EXP_2017 SUM NMISS MEAN STD STDERR LCLM UCLM MEDIAN MIN MAX 
+		QRANGE MAXDEC=2;
+	CLASS AGE_BUCKET;
+	VAR TOTEXP17;
+RUN;
+
+TITLE '2017 AVERAGE EXPENSE PER PERSON WITH AN EXPENSE BY AGE BUCKETS';
+ODS GRAPHICS OFF;
+*Turn off printing of graphs;
+*Run the surveymeans procedure for expenses and expenses by age flag;
+ODS EXCLUDE ALL;
+*Turn off printing of output;
+
+PROC SURVEYMEANS DATA=EXP_2017 NOBS MEAN STDERR SUM STD;
+	VAR TOTEXP17;
+	DOMAIN EXPENSES('1') EXPENSES('1')*AGE_BUCKET;
+	*FORMAT AGE_FLAG AGE_FLAG.;
+	ODS OUTPUT domain=work.Results_2017;
+RUN;
+
+ODS EXCLUDE NONE;
+*Turn on printing of output;
+
+PROC PRINT DATA=work.Results_2017 noobs split='*';
+	VAR AGE_BUCKET N Sum mean StdErr stddev;
+	LABEL AGE_BUCKET='AGE Group' mean='Mean($)' StdErr='SE of Mean($)' 
+		Sum='Total*Expense ($)' Stddev='SE of*Total Expense($)';
+	FORMAT N mean comma9.1 stderr 9.4 sum Stddev comma17.;
+RUN;
+
+*TITLE 'GENERATE SAS SUMMARY STATISTICS FOR 2012 HEALTH CARE EXPENSES';
+*Create datset based on 2012 data containing age, expenses, age flag;
+
+DATA EXP_2012;
+	SET WORK.h155 (KEEP=AGE12X TOTEXP12);
+	TOTAL=TOTEXP12;
+	AGE_BUCKET=AGE12X;
+	EXPENSES=0;
+
+	IF TOTAL > 0 THEN
+		EXPENSES=1;
+	FORMAT AGE_BUCKET AGE_BUCKET.;
+RUN;
+
+TITLE 'SUMMARY STATISTICS FOR TOTAL 2012 HEALTHCARE EXPENSES';
+*Run desciptive stats for 2012 total expenses;
+
+PROC MEANS DATA=EXP_2012 SUM NMISS MEAN STD STDERR LCLM UCLM MEDIAN MIN MAX 
+		QRANGE MAXDEC=2;
+	VAR TOTEXP12;
+RUN;
+
+TITLE 'SUMMARY STATISTICS FOR TOTAL 2012 HEALTHCARE EXPENSES BY AGE BUCKET';
+*Run descriptive stats for 2012 total expenses by age flag;
+
+PROC MEANS DATA=EXP_2012 SUM NMISS MEAN STD STDERR LCLM UCLM MEDIAN MIN MAX 
+		QRANGE MAXDEC=2;
+	CLASS AGE_BUCKET;
+	VAR TOTEXP12;
+RUN;
+
+TITLE '2012 AVERAGE EXPENSE PER PERSON WITH AN EXPENSE BY AGE BUCKETS';
+ODS GRAPHICS OFF; *Turn off printing of graphs;
+ODS EXCLUDE ALL;  *Turn off printing of output;
+
+*Create output of surveymeans;
+PROC SURVEYMEANS DATA=EXP_2012 NOBS MEAN STDERR SUM STD;
+	VAR TOTEXP12;
+	DOMAIN EXPENSES('1') EXPENSES('1')*AGE_BUCKET;
+	ODS OUTPUT domain=work.Results_2012;
+RUN;
+
+ODS EXCLUDE NONE; *Turn on printing of output;
+
+PROC PRINT DATA=work.Results_2012 NOOBS SPLIT='*';
+	VAR AGE_BUCKET N Sum mean StdErr stddev;
+	*LABEL AGE_BUCKET='AGE Group' mean='Mean($)' 
+		StdErr='SE of Mean($)' Sum='Total*Expense ($)' 
+		Stddev='SE of*Total Expense($)';
+	FORMAT N mean comma9.1 stderr 9.4 sum Stddev comma17.;
+RUN;
+
+*Create 2017 dataset containing age, expense, and year;
+*Will be merged with 2012 data;
+
+DATA EXP_2017_2;
+	SET EXP_2017 (RENAME=(AGE17X=AGE TOTEXP17=EXPENSE));
+	YEAR=2017;
+RUN;
+
+*Create 2012 dataset containing age, expense, and year;
+*Will be merged with 2017 data;
+
+DATA EXP_2012_2;
+	SET EXP_2012 (RENAME=(AGE12X=AGE TOTEXP12=EXPENSE));
+	YEAR=2012;
+RUN;
+
+*Combine 2017 and 2012 datasets;
+
+DATA COMBINED_EXPENSES;
+	SET EXP_2012_2 EXP_2017_2 (KEEP=YEAR AGE_BUCKET EXPENSE);
+RUN;
+
+ODS GRAPHICS ON;
+
+/*Sort the data by treatment*/
+PROC SORT DATA=COMBINED_EXPENSES;
+	BY YEAR AGE_BUCKET;
+RUN;
+
+TITLE 'NORMALITY TEST BASED ON YEAR DATA';
+
+/*Test for normality*/
+PROC UNIVARIATE DATA=COMBINED_EXPENSES NORMAL;
+	BY YEAR;
+	VAR EXPENSE;
+	QQPLOT /NORMAL (mu=est sigma=est);
+RUN;
+
+TITLE 'TWO-SAMPLE T-TEST BASED ON YEAR DATA';
+
+/*Test for equality of variances and perform anova*/
+PROC GLM DATA=COMBINED_EXPENSES;
+	CLASS YEAR;
+	MODEL EXPENSE=YEAR;
+	MEANS YEAR / hovtest=levene(type=abs) welch;
+	LSMEANS YEAR /pdiff adjust=tukey plot=meanplot(connect cl) lines;
+	RUN;
+QUIT;
+
+/*Sort the data by treatment*/
+PROC SORT DATA=EXP_2017_2;
+	BY AGE_BUCKET;
+RUN;
+
+TITLE 'NORMALITY TEST BASED ON AGE BUCKET DATA FOR 2017';
+
+/*Test for normality*/
+PROC UNIVARIATE DATA=EXP_2017_2 NORMAL;
+	BY AGE_BUCKET;
+	VAR EXPENSE;
+	QQPLOT /NORMAL (mu=est sigma=est);
+RUN;
+
+TITLE 'TWO-SAMPLE T-TEST BASED ON AGE BUCKET DATA';
+
+/*Test for equality of variances and perform anova*/
+PROC GLM DATA=COMBINED_EXPENSES;
+	CLASS AGE_BUCKET;
+	MODEL EXPENSE=AGE_BUCKET;
+	MEANS AGE_BUCKET / hovtest=levene(type=abs) welch;
+	LSMEANS AGE_BUCKET /pdiff adjust=tukey plot=meanplot(connect cl) lines;
+	RUN;
+QUIT;
